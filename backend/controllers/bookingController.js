@@ -34,57 +34,64 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // Check if vehicle exists and is available
-    const [vehicles] = await db.query(
-      'SELECT * FROM vehicles WHERE vehicle_id = ?',
-      [vehicle_id]
-    );
-
-    if (vehicles.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Vehicle not found' 
-      });
-    }
-
-    const vehicle = vehicles[0];
-
-    if (vehicle.status !== 'available') {
-      return res.status(400).json({ 
-        success: false, 
-        message: `Vehicle is currently ${vehicle.status}` 
-      });
-    }
-
-    // Check for overlapping bookings (prevent double booking)
-    const [overlappingBookings] = await db.query(
-      `SELECT * FROM bookings 
-       WHERE vehicle_id = ? 
-       AND booking_status = 'active'
-       AND NOT (end_date < ? OR start_date > ?)`,
-      [vehicle_id, start_date, end_date]
-    );
-
-    if (overlappingBookings.length > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Vehicle is already booked for the selected dates' 
-      });
-    }
-
-    // Calculate total days and amount
+    // Calculate total days and amount (will be recalculated inside transaction)
     const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-    const totalAmount = totalDays * parseFloat(vehicle.rent_per_day);
 
     // Start transaction
     const connection = await db.getConnection();
     await connection.beginTransaction();
 
     try {
+      // Check if vehicle exists and is available (inside transaction with lock)
+      const [vehicles] = await connection.query(
+        'SELECT * FROM vehicles WHERE vehicle_id = ? FOR UPDATE',
+        [vehicle_id]
+      );
+
+      if (vehicles.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({
+          success: false,
+          message: 'Vehicle not found'
+        });
+      }
+
+      const vehicle = vehicles[0];
+
+      if (vehicle.status !== 'available') {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          message: `Vehicle is currently ${vehicle.status}`
+        });
+      }
+
+      // Check for overlapping bookings (prevent double booking)
+      const [overlappingBookings] = await connection.query(
+        `SELECT * FROM bookings
+         WHERE vehicle_id = ?
+         AND booking_status = 'active'
+         AND NOT (end_date < ? OR start_date > ?)`,
+        [vehicle_id, start_date, end_date]
+      );
+
+      if (overlappingBookings.length > 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          message: 'Vehicle is already booked for the selected dates'
+        });
+      }
+
+      const totalAmount = totalDays * parseFloat(vehicle.rent_per_day);
+
       // Create booking
       const [bookingResult] = await connection.query(
-        `INSERT INTO bookings 
-        (user_id, vehicle_id, start_date, end_date, total_days, rent_per_day, total_amount, booking_status) 
+        `INSERT INTO bookings
+        (user_id, vehicle_id, start_date, end_date, total_days, rent_per_day, total_amount, booking_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [user_id, vehicle_id, start_date, end_date, totalDays, vehicle.rent_per_day, totalAmount, 'active']
       );
