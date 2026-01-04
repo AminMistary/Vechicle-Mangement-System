@@ -119,14 +119,6 @@ A modern, full-stack vehicle rental management system that allows users to brows
 - Vehicle Listing
 - Booking Form
 - Admin Panel
-
-## 🎥 Demo
-
-<!-- Animated Demo GIF -->
-<img src="https://via.placeholder.com/800x400?text=Demo+GIF+Coming+Soon" alt="Demo GIF" />
-
-*Watch the demo video to see the system in action: [Demo Video Link](https://example.com/demo)*
-
 ## 🤝 Contributing
 
 We welcome contributions! Please follow these steps:
